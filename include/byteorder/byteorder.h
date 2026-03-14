@@ -117,9 +117,12 @@ struct cpu_features
         unsigned int eax, ebx, ecx, edx;
         __get_cpuid(7, &eax, &ebx, &ecx, &edx);
         return (ebx & (1 << 5)) != 0;
-#  endif
-#endif
+#  else
         return false;
+#  endif
+#else
+        return false;
+#endif
     }
 
     [[nodiscard]] static bool has_neon() noexcept
@@ -694,8 +697,7 @@ namespace literals
 
 [[nodiscard]] constexpr auto operator""_be(unsigned long long value) noexcept
 {
-    return basic_endian<uint64_t>(
-        detail::byte_swap(static_cast<uint64_t>(value)));
+    return basic_endian<uint64_t>(static_cast<uint64_t>(value));
 }
 
 } // namespace literals
