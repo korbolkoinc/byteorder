@@ -1,17 +1,9 @@
 # ============================================================================
-# Modern C++ Project Template - CMake Build Configuration
+# byteorder - CMake Build Configuration
 # ============================================================================
 #
-# This CMakeLists.txt file configures the build process for a modern C++
-# project with the following features:
-#
-# - C++20 standard support
-# - Configurable version information
-# - Support for tests, examples, benchmarks, and documentation
-# - Compiler warnings and sanitizers for quality assurance
-# - Code coverage instrumentation and HTML report generation
-# - Shared/static library support with proper symbol visibility
-# - Package configuration for easy integration in other projects
+# High-performance, header-only C++20 byte-order (endianness) conversion
+# library with SIMD acceleration (AVX2 / ARM NEON).
 #
 # QUICK START:
 #   cmake --preset debug            # Configure with debug preset
@@ -24,13 +16,11 @@
 #   cmake --build .
 #
 # CONFIGURATION OPTIONS:
-#   -DBUILD_SHARED_LIBS=ON|OFF     - Build shared libraries instead of static
 #   -DBUILD_EXAMPLES=ON|OFF        - Build example programs
 #   -DBUILD_TESTS=ON|OFF           - Build and enable tests
 #   -DBUILD_BENCHMARKS=ON|OFF      - Build benchmarking programs
 #   -DENABLE_COVERAGE=ON|OFF       - Enable code coverage reporting
 #   -DENABLE_SANITIZERS=ON|OFF     - Enable sanitizers in debug builds
-#   -DENABLE_PCH=ON|OFF            - Enable precompiled headers
 #   -DENABLE_LTO=ON|OFF            - Enable Link Time Optimization
 #
 # ============================================================================
@@ -49,18 +39,18 @@ cmake_minimum_required(VERSION 3.21)
 #   MAJOR - breaking API changes
 #   MINOR - new features, backward compatible
 #   PATCH - bug fixes, backward compatible
-set(PROJECT_VERSION_MAJOR 0)
-set(PROJECT_VERSION_MINOR 1)
+set(PROJECT_VERSION_MAJOR 1)
+set(PROJECT_VERSION_MINOR 0)
 set(PROJECT_VERSION_PATCH 0)
 set(PROJECT_VERSION "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}")
 
 # Define the project with metadata
 # These values are used by CPack, Doxygen, and install targets
-project(cpp_project_template
+project(byteorder
     VERSION ${PROJECT_VERSION}
-    DESCRIPTION "Modern C++ Project Template"
-    HOMEPAGE_URL "https://github.com/hun756/CPP-Starter-Template"
-    LANGUAGES CXX C
+    DESCRIPTION "High-performance C++20 header-only byte-order conversion library"
+    HOMEPAGE_URL "https://github.com/korbolkoinc/byteorder"
+    LANGUAGES CXX
 )
 
 # ============================================================================
@@ -83,7 +73,6 @@ endif()
 # ============================================================================
 # These can be set using -D flags when running cmake, or via CMakePresets.json.
 # Example: cmake .. -DBUILD_SHARED_LIBS=ON -DENABLE_SANITIZERS=ON
-option(BUILD_SHARED_LIBS "Build shared libraries instead of static" OFF)
 option(BUILD_EXAMPLES "Build example programs demonstrating library usage" ON)
 option(BUILD_TESTS "Build unit tests (requires Google Test)" ON)
 option(BUILD_BENCHMARKS "Build performance benchmark programs" OFF)
@@ -219,13 +208,16 @@ target_compile_definitions(${PROJECT_NAME} PUBLIC
 )
 
 # ============================================================================
-# Main Executable
+# Main Executable  (demo / smoke-test)
 # ============================================================================
-# Create a standalone executable that links to our library.
-# The output name is set to match the project name (without the _exe suffix).
 add_executable(${PROJECT_NAME}_exe src/main.cpp)
 target_link_libraries(${PROJECT_NAME}_exe PRIVATE ${PROJECT_NAME})
 set_target_properties(${PROJECT_NAME}_exe PROPERTIES OUTPUT_NAME ${PROJECT_NAME})
+target_compile_warnings(${PROJECT_NAME}_exe PRIVATE)
+if(ENABLE_SANITIZERS)
+    target_enable_sanitizers(${PROJECT_NAME}_exe)
+endif()
+target_enable_coverage(${PROJECT_NAME}_exe)
 
 # ============================================================================
 # Optional Subdirectories
@@ -245,7 +237,7 @@ if(BUILD_TESTS)
 endif()
 
 # API documentation with Doxygen (only if Doxygen is installed)
-# Generate docs with: cmake --build . --target cpp_project_template_docs
+# Generate docs with: cmake --build . --target byteorder_docs
 find_package(Doxygen)
 if(DOXYGEN_FOUND)
     set(DOCS_TARGET_NAME "${PROJECT_NAME}_docs")
@@ -271,27 +263,19 @@ endif()
 # (CMAKE_INSTALL_BINDIR, CMAKE_INSTALL_LIBDIR, CMAKE_INSTALL_INCLUDEDIR)
 include(GNUInstallDirs)
 
-# Install the library and executable
+# Install the INTERFACE library target and the demo executable
 install(TARGETS ${PROJECT_NAME} ${PROJECT_NAME}_exe
     EXPORT ${PROJECT_NAME}Targets
-    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}     # Executables go to bin/
-    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}     # Shared libs go to lib/
-    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}     # Static libs go to lib/
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
 # Install public header files (preserving directory structure)
 install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
-# Install the generated configuration header with version info
+# Install the generated configuration header
 install(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/generated/configs/ProjectConfig.h"
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/configs
-)
-
-# Install the generated export header for shared library support
-install(FILES
-    "${CMAKE_CURRENT_BINARY_DIR}/generated/${PROJECT_NAME}/Export.h"
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}
 )
 
 # Install CMake targets file so other projects can find_package() us
@@ -301,25 +285,22 @@ install(EXPORT ${PROJECT_NAME}Targets
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}
 )
 
-# Generate and install package configuration files.
-# These files allow other CMake projects to find and use this library
-# with find_package(cpp_project_template)
+# Generate and install package configuration files so that consumers can
+# use find_package(byteorder REQUIRED) to locate this library.
 include(CMakePackageConfigHelpers)
 configure_package_config_file(
-    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/configs/${PROJECT_NAME}Config.cmake.in"
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/configs/byteorderConfig.cmake.in"
     "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}Config.cmake"
     INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}
 )
 
-# Generate version compatibility file.
-# SameMajorVersion means consumers can use any 0.x.y version with this library
+# AnyNewerVersion: patch/minor bumps remain compatible
 write_basic_package_version_file(
     "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}ConfigVersion.cmake"
     VERSION ${PROJECT_VERSION}
-    COMPATIBILITY SameMajorVersion
+    COMPATIBILITY AnyNewerVersion
 )
 
-# Install the CMake config and version files
 install(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}Config.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}ConfigVersion.cmake"
