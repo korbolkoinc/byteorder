@@ -121,91 +121,28 @@ configure_file(
     "${CMAKE_CURRENT_BINARY_DIR}/generated/configs/ProjectConfig.h"
 )
 
-# GenerateExportHeader creates proper DLL export/import macros.
-# This is essential for building shared libraries on Windows and
-# for controlling symbol visibility on all platforms.
-include(GenerateExportHeader)
-
 # ============================================================================
-# Library Target
+# Library Target  (header-only — INTERFACE)
 # ============================================================================
-# Collect all source files for the library, excluding main.cpp.
-# CONFIGURE_DEPENDS tells CMake to re-run if files are added/removed
-# (Note: This has a small cost on configure time, but prevents build issues)
-file(GLOB_RECURSE LIB_SOURCES CONFIGURE_DEPENDS "src/*.cpp")
-list(FILTER LIB_SOURCES EXCLUDE REGEX ".*main\\.cpp$")
+# byteorder is a header-only template library; no source files are compiled
+# into the library itself.  The INTERFACE target propagates include paths and
+# C++ standard requirements to every consumer automatically.
+add_library(${PROJECT_NAME} INTERFACE)
 
-# Create the main library target.
-# BUILD_SHARED_LIBS controls whether this is a static or shared library.
-add_library(${PROJECT_NAME} ${LIB_SOURCES})
-
-# Create a namespaced alias so consumers can use:
-#   target_link_libraries(my_target PRIVATE cpp_project_template::cpp_project_template)
-# This works the same whether the library is found via find_package() or add_subdirectory()
+# Namespaced alias — consumers use:
+#   target_link_libraries(my_target PRIVATE byteorder::byteorder)
+# This works identically whether found via find_package() or add_subdirectory().
 add_library(${PROJECT_NAME}::${PROJECT_NAME} ALIAS ${PROJECT_NAME})
 
-# Generate the export header for shared library symbol visibility.
-# When building a shared library, only symbols marked with cpp_project_template_EXPORT
-# will be visible. This follows the "hidden by default" best practice.
-#
-# Usage in your headers:
-#   #include "cpp_project_template/Export.h"
-#   class cpp_project_template_EXPORT MyClass { ... };
-generate_export_header(${PROJECT_NAME}
-    EXPORT_FILE_NAME "${CMAKE_CURRENT_BINARY_DIR}/generated/${PROJECT_NAME}/Export.h"
-    EXPORT_MACRO_NAME ${PROJECT_NAME}_EXPORT
-    STATIC_DEFINE ${PROJECT_NAME}_STATIC
+# Propagate include directories to consumers
+target_include_directories(${PROJECT_NAME} INTERFACE
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>    # Public headers
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/generated>  # Generated config header
+    $<INSTALL_INTERFACE:include>                              # After installation
 )
 
-# Apply strict compiler warnings to catch potential issues early
-target_compile_warnings(${PROJECT_NAME} PRIVATE)
-
-# Enable runtime sanitizers for catching memory errors, undefined behavior, etc.
-if(ENABLE_SANITIZERS)
-    target_enable_sanitizers(${PROJECT_NAME})
-endif()
-
-# Enable code coverage instrumentation (only effective with --preset coverage)
-target_enable_coverage(${PROJECT_NAME})
-
-# Precompiled headers can significantly speed up compilation for large projects.
-# Add your most frequently used standard library headers here.
-if(ENABLE_PCH)
-    target_precompile_headers(${PROJECT_NAME} PRIVATE
-        <algorithm>
-        <functional>
-        <map>
-        <memory>
-        <string>
-        <string_view>
-        <vector>
-    )
-endif()
-
-# Set library properties for versioning and symbol visibility
-set_target_properties(${PROJECT_NAME} PROPERTIES
-    VERSION ${PROJECT_VERSION}         # Full version (e.g., libfoo.so.0.1.0)
-    SOVERSION ${PROJECT_VERSION_MAJOR} # ABI version (e.g., libfoo.so.0)
-    POSITION_INDEPENDENT_CODE ON       # Required for shared libraries
-    EXPORT_NAME ${PROJECT_NAME}        # Name used in exported CMake targets
-    CXX_VISIBILITY_PRESET hidden       # Hide all symbols by default
-    VISIBILITY_INLINES_HIDDEN ON       # Also hide inline function symbols
-)
-
-# Configure include directories with generator expressions.
-# BUILD_INTERFACE: paths used when building this project
-# INSTALL_INTERFACE: paths used when this library is installed and consumed
-target_include_directories(${PROJECT_NAME} PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>       # Public headers
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/generated>     # Generated headers
-    $<INSTALL_INTERFACE:include>                                  # After installation
-)
-
-# When building as a static library, define the STATIC macro so the
-# export header knows not to use __declspec(dllexport/dllimport) on Windows
-target_compile_definitions(${PROJECT_NAME} PUBLIC
-    $<$<NOT:$<BOOL:${BUILD_SHARED_LIBS}>>:${PROJECT_NAME}_STATIC>
-)
+# Require C++20 from any target that links to this library
+target_compile_features(${PROJECT_NAME} INTERFACE cxx_std_20)
 
 # ============================================================================
 # Main Executable  (demo / smoke-test)
