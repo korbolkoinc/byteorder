@@ -14,10 +14,13 @@
 #include <iostream>
 #include <sstream>
 #include <vector>
+#include <array>
+#include <chrono>
+#include <random>
+#include <iomanip>
 
 using namespace endian;
 
-// ─── batch_byte_swap via convert_batch ──────────────────────────────────────
 static void demo_batch_swap()
 {
     std::cout << "=== Batch swap (32-bit) ===\n";
@@ -39,7 +42,57 @@ static void demo_batch_swap()
     std::cout << std::dec << "All assertions passed.\n\n";
 }
 
-// ─── buffer_view zero-copy I/O ───────────────────────────────────────────────
+static void demo_large_batch()
+{
+    std::cout << "=== Large batch operation (SIMD accelerated) ===\n";
+
+    constexpr size_t N = 65536;
+    std::vector<uint64_t> src(N), dst(N);
+
+    std::mt19937_64 rng(42);
+    for (size_t i = 0; i < N; ++i)
+        src[i] = rng();
+
+    auto start = std::chrono::high_resolution_clock::now();
+    batch_byte_swap(src.data(), dst.data(), N, false);
+    auto end = std::chrono::high_resolution_clock::now();
+
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+    double throughput = (N * sizeof(uint64_t) * 1000.0) / duration;
+
+    std::cout << "  Processed " << N << " elements (" 
+              << (N * sizeof(uint64_t) / 1024.0) << " KB)\n";
+    std::cout << "  Time: " << duration << " µs\n";
+    std::cout << "  Throughput: " << std::fixed << std::setprecision(2) 
+              << throughput << " MB/s\n";
+
+    assert(dst[0] == detail::byte_swap(src[0]));
+    assert(dst[N - 1] == detail::byte_swap(src[N - 1]));
+    std::cout << "  Verification: PASSED\n\n";
+}
+
+static void demo_inplace_swap()
+{
+    std::cout << "=== In-place batch swap ===\n";
+
+    std::array<uint16_t, 8> data = {
+        0x0102, 0x0304, 0x0506, 0x0708,
+        0x090A, 0x0B0C, 0x0D0E, 0x0F10
+    };
+
+    std::cout << "  Before: ";
+    for (auto v : data)
+        std::cout << std::hex << v << " ";
+    std::cout << "\n";
+
+    batch_byte_swap_inplace(data.data(), data.size());
+
+    std::cout << "  After:  ";
+    for (auto v : data)
+        std::cout << v << " ";
+    std::cout << std::dec << "\n\n";
+}
+
 static void demo_buffer_view()
 {
     std::cout << "=== Zero-copy buffer view ===\n";
@@ -61,14 +114,58 @@ static void demo_buffer_view()
               << "  [OK]\n\n";
 }
 
-// ─── multi-value stream serialization ────────────────────────────────────────
+static void demo_endian_span()
+{
+    std::cout << "=== endian_span operations ===\n";
+
+    std::vector<uint32_t> data = {0x12345678, 0xDEADBEEF, 0xCAFEBABE, 0x01020304};
+    endian_span<uint32_t, byte_order::native> span(data);
+
+    std::cout << "  Access via proxy:\n";
+    for (size_t i = 0; i < span.size(); ++i)
+    {
+        std::cout << "    [" << i << "] native: 0x" << std::hex 
+                  << span[i].native() << '\n';
+    }
+
+    std::cout << "  Iteration:\n    ";
+    for (const auto& elem : span)
+    {
+        std::cout << "0x" << elem.big() << " ";
+    }
+    std::cout << std::dec << "\n\n";
+}
+
+static void demo_prefetch_batch()
+{
+    std::cout << "=== Prefetch-optimized batch swap ===\n";
+
+    constexpr size_t N = 32768;
+    std::vector<uint64_t> src(N), dst(N);
+
+    std::mt19937_64 rng(123);
+    for (size_t i = 0; i < N; ++i)
+        src[i] = rng();
+
+    auto start = std::chrono::high_resolution_clock::now();
+    batch_byte_swap_prefetch(src.data(), dst.data(), N, 16);
+    auto end = std::chrono::high_resolution_clock::now();
+
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+    double throughput = (N * sizeof(uint64_t) * 1000.0) / duration;
+
+    std::cout << "  Processed " << N << " elements with prefetch\n";
+    std::cout << "  Time: " << duration << " µs\n";
+    std::cout << "  Throughput: " << std::fixed << std::setprecision(2)
+              << throughput << " MB/s\n\n";
+}
+
 static void demo_stream_serialization()
 {
     std::cout << "=== Stream serialization ===\n";
 
     std::stringstream ss;
 
-    // Write three different-width values in big-endian order
     basic_endian<uint16_t> v16(0xABCD);
     basic_endian<uint32_t> v32(0xDEADBEEF);
     basic_endian<uint64_t> v64(0xCAFEBABE01020304ull);
@@ -77,7 +174,6 @@ static void demo_stream_serialization()
     v32.serialize(ss);
     v64.serialize(ss);
 
-    // Read them back
     basic_endian<uint16_t> r16;
     basic_endian<uint32_t> r32;
     basic_endian<uint64_t> r64;
@@ -97,11 +193,37 @@ static void demo_stream_serialization()
               << std::dec;
 }
 
+static void demo_network_order()
+{
+    std::cout << "=== Network byte order helpers ===\n";
+
+    using network = basic_endian<uint32_t>::network_order;
+    using host_order = basic_endian<uint32_t>::big_endian_order;
+
+    constexpr uint32_t ip_addr = 0xC0A80101; // 192.168.1.1
+
+    const uint32_t network_order = network::host_to_network(ip_addr);
+    const uint32_t back = network::network_to_host(network_order);
+
+    std::cout << std::hex;
+    std::cout << "  Host:       0x" << ip_addr << '\n';
+    std::cout << "  Network:    0x" << network_order << '\n';
+    std::cout << "  Back to host: 0x" << back << '\n';
+    std::cout << std::dec;
+    std::cout << "  Roundtrip:  " << (back == ip_addr ? "PASSED" : "FAILED") << "\n\n";
+}
+
 int main()
 {
     demo_batch_swap();
+    demo_large_batch();
+    demo_inplace_swap();
     demo_buffer_view();
+    demo_endian_span();
+    demo_prefetch_batch();
     demo_stream_serialization();
+    demo_network_order();
+
     std::cout << "\nAll demos completed successfully.\n";
     return 0;
 }
