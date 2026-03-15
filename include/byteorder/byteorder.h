@@ -98,6 +98,10 @@ namespace detail
 // Thin compatibility wrappers so existing code (and tests) can keep using
 // endian::detail::has_avx2() / has_avx512() / has_neon() / has_sve().
 // Internally they delegate to simd_feature_check or compile-time macros.
+//
+// has_avx512 preserves the original compile-time gate: returns false when
+// the binary was not compiled with -mavx512f / /arch:AVX512 so that callers
+// don't accidentally use AVX-512 intrinsics on non-AVX-512 builds.
 [[nodiscard]] inline bool has_avx2() noexcept
 {
     return simd::detail::CPUInfo::has_avx2();
@@ -105,7 +109,11 @@ namespace detail
 
 [[nodiscard]] inline bool has_avx512() noexcept
 {
+#if defined(__AVX512F__)
     return simd::detail::CPUInfo::has_avx512f();
+#else
+    return false;  // Binary not compiled with AVX-512 — intrinsics unavailable
+#endif
 }
 
 [[nodiscard]] inline bool has_neon() noexcept
@@ -812,14 +820,11 @@ public:
 
     [[nodiscard]] ENDIAN_ALWAYS_INLINE constexpr T order(byte_order o) const noexcept
     {
-        switch (o)
-        {
-            case byte_order::little:  return little();
-            case byte_order::big:     return big();
-            case byte_order::native:  return native();
-            case byte_order::network: return big();
-            default:                  return native();
-        }
+        if (o == byte_order::big || o == byte_order::network)
+            return big();
+        if (o == byte_order::little)
+            return little();
+        return native();
     }
 
     ENDIAN_ALWAYS_INLINE constexpr void store_native(T v) noexcept
@@ -848,13 +853,12 @@ public:
 
     ENDIAN_ALWAYS_INLINE constexpr void store_order(byte_order o, T v) noexcept
     {
-        switch (o)
-        {
-            case byte_order::little:  store_little(v);  break;
-            case byte_order::big:     store_big(v);     break;
-            case byte_order::native:  store_native(v);  break;
-            case byte_order::network: store_big(v);     break;
-        }
+        if (o == byte_order::big || o == byte_order::network)
+            store_big(v);
+        else if (o == byte_order::little)
+            store_little(v);
+        else
+            store_native(v);
     }
 
     template <typename Container>
@@ -959,21 +963,17 @@ public:
         {
             T result;
             std::memcpy(&result, data_.data(), sizeof(T));
-            switch (o)
+            if (o == byte_order::little)
             {
-                case byte_order::little:
-                    if constexpr (std::endian::native != std::endian::little)
-                        result = detail::byte_swap(result);
-                    break;
-                case byte_order::big:
-                case byte_order::network:
-                    if constexpr (std::endian::native == std::endian::little)
-                        result = detail::byte_swap(result);
-                    break;
-                case byte_order::native:
-                default:
-                    break;
+                if constexpr (std::endian::native != std::endian::little)
+                    result = detail::byte_swap(result);
             }
+            else if (o == byte_order::big || o == byte_order::network)
+            {
+                if constexpr (std::endian::native == std::endian::little)
+                    result = detail::byte_swap(result);
+            }
+            // native: data is already in native byte order, no swap needed
             return result;
         }
 
@@ -998,13 +998,12 @@ public:
 
         ENDIAN_ALWAYS_INLINE void store_order(byte_order o, T value) noexcept
         {
-            switch (o)
-            {
-                case byte_order::little:  store_little(value);  break;
-                case byte_order::big:     store_big(value);     break;
-                case byte_order::native:  store_native(value);  break;
-                case byte_order::network: store_big(value);     break;
-            }
+            if (o == byte_order::big || o == byte_order::network)
+                store_big(value);
+            else if (o == byte_order::little)
+                store_little(value);
+            else
+                store_native(value);
         }
 
         [[nodiscard]] constexpr std::span<std::byte>       raw_data()       noexcept { return data_; }
@@ -1060,21 +1059,17 @@ public:
         {
             T result;
             std::memcpy(&result, data_.data(), sizeof(T));
-            switch (o)
+            if (o == byte_order::little)
             {
-                case byte_order::little:
-                    if constexpr (std::endian::native != std::endian::little)
-                        result = detail::byte_swap(result);
-                    break;
-                case byte_order::big:
-                case byte_order::network:
-                    if constexpr (std::endian::native == std::endian::little)
-                        result = detail::byte_swap(result);
-                    break;
-                case byte_order::native:
-                default:
-                    break;
+                if constexpr (std::endian::native != std::endian::little)
+                    result = detail::byte_swap(result);
             }
+            else if (o == byte_order::big || o == byte_order::network)
+            {
+                if constexpr (std::endian::native == std::endian::little)
+                    result = detail::byte_swap(result);
+            }
+            // native: data is already in native byte order, no swap needed
             return result;
         }
 
