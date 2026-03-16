@@ -95,44 +95,6 @@ public:
 namespace detail
 {
 
-// Thin compatibility wrappers so existing code (and tests) can keep using
-// endian::detail::has_avx2() / has_avx512() / has_neon() / has_sve().
-// Internally they delegate to simd_feature_check or compile-time macros.
-//
-// has_avx512 preserves the original compile-time gate: returns false when
-// the binary was not compiled with -mavx512f / /arch:AVX512 so that callers
-// don't accidentally use AVX-512 intrinsics on non-AVX-512 builds.
-[[nodiscard]] inline bool has_avx2() noexcept
-{
-    return simd::detail::CPUInfo::has_avx2();
-}
-
-[[nodiscard]] inline bool has_avx512() noexcept
-{
-#if defined(__AVX512F__)
-    return simd::detail::CPUInfo::has_avx512f();
-#else
-    return false;  // Binary not compiled with AVX-512 — intrinsics unavailable
-#endif
-}
-
-[[nodiscard]] inline bool has_neon() noexcept
-{
-#if defined(__ARM_NEON) || defined(__ARM_NEON__)
-    return true;
-#else
-    return false;
-#endif
-}
-
-[[nodiscard]] inline bool has_sve() noexcept
-{
-#if defined(__ARM_FEATURE_SVE)
-    return true;
-#else
-    return false;
-#endif
-}
 
 template <typename T>
 concept ByteSwappable =
@@ -373,7 +335,7 @@ ENDIAN_ALWAYS_INLINE void byte_swap_scalar_fast(const T* ENDIAN_RESTRICT src,
 #endif
 
 #if defined(__ARM_NEON) || defined(__ARM_NEON__)
-    if (!std::is_constant_evaluated() && has_neon() && sizeof(T) == 4)
+    if (!std::is_constant_evaluated() && sizeof(T) == 4)
     {
         size_t i = 0;
         for (; i + 3 < count; i += 4)
@@ -415,7 +377,7 @@ ENDIAN_ALWAYS_INLINE void byte_swap_scalar_fast_16(const T* ENDIAN_RESTRICT src,
 #endif
 
 #if defined(__ARM_NEON) || defined(__ARM_NEON__)
-    if (!std::is_constant_evaluated() && has_neon())
+    if (!std::is_constant_evaluated())
     {
         size_t i = 0;
         for (; i + 7 < count; i += 8)
@@ -488,7 +450,7 @@ ENDIAN_ALWAYS_INLINE void byte_swap_scalar_fast_64(const T* ENDIAN_RESTRICT src,
 #endif
 
 #if defined(__ARM_NEON) || defined(__ARM_NEON__)
-    if (!std::is_constant_evaluated() && has_neon())
+    if (!std::is_constant_evaluated())
     {
         size_t i = 0;
         for (; i + 1 < count; i += 2)
